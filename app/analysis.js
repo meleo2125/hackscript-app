@@ -1,16 +1,19 @@
 // app/analysis.js
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { FontAwesome } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import audioRecorderService from "../services/audioRecorderService";
+import * as Permissions from 'expo-permissions';
 
 export default function Analysis() {
   const router = useRouter();
   const [isRecording, setIsRecording] = useState(false);
   const [analysisResults, setAnalysisResults] = useState([]);
   const [currentEmotion, setCurrentEmotion] = useState(null);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [analysisCounter, setAnalysisCounter] = useState(0);
 
   // Map emotion codes to human-readable labels and colors
   const emotionMap = {
@@ -22,13 +25,48 @@ export default function Analysis() {
     5: { label: "Fearful", color: "#9c27b0" }
   };
 
+  // Request microphone permissions
+  useEffect(() => {
+    const requestPermissions = async () => {
+      try {
+        const { status } = await Permissions.askAsync(Permissions.AUDIO_RECORDING);
+        setPermissionGranted(status === 'granted');
+        
+        if (status !== 'granted') {
+          Alert.alert(
+            'Permission Required',
+            'This app needs microphone access to analyze voice emotions.',
+            [{ text: 'OK' }]
+          );
+        }
+      } catch (err) {
+        console.error('Error requesting permissions:', err);
+        Alert.alert('Error', 'Failed to request microphone permissions');
+      }
+    };
+    
+    requestPermissions();
+  }, []);
+
   useEffect(() => {
     // Set up listeners for the audio recorder service
     audioRecorderService.setOnStatusChange((status) => {
+      console.log('Recording status changed:', status);
       setIsRecording(status.isRecording);
+      
+      // Reset counter when recording starts/stops
+      if (!status.isRecording) {
+        setAnalysisCounter(0);
+      }
     });
     
     audioRecorderService.setOnAnalysisReceived((data) => {
+      console.log('Analysis received:', data);
+      
+      // Increment counter for each analysis batch
+      setAnalysisCounter(prev => prev + 1);
+      
+      // Handle the emotion data
       const emotion = data.emotion;
       setCurrentEmotion(emotion);
       
@@ -37,7 +75,8 @@ export default function Analysis() {
         {
           timestamp: new Date().toLocaleTimeString(),
           emotion: emotion,
-          confidence: data.confidence || 0.0
+          confidence: data.confidence || 0.0,
+          batchNumber: analysisCounter + 1 // Show which 3-second batch this is
         },
         ...prevResults
       ].slice(0, 20)); // Keep only the 20 most recent results
@@ -46,17 +85,32 @@ export default function Analysis() {
     return () => {
       // Clean up when component unmounts
       if (isRecording) {
-        audioRecorderService.stopRecording();
+        audioRecorderService.stopRecording()
+          .catch(err => console.error('Error stopping recording on unmount:', err));
       }
       audioRecorderService.disconnectSocket();
     };
-  }, []);
+  }, [analysisCounter]);
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      audioRecorderService.stopRecording();
-    } else {
-      audioRecorderService.startRecording();
+  const toggleRecording = async () => {
+    if (!permissionGranted) {
+      Alert.alert(
+        'Permission Required',
+        'This app needs microphone access to analyze voice emotions.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    try {
+      if (isRecording) {
+        await audioRecorderService.stopRecording();
+      } else {
+        await audioRecorderService.startRecording();
+      }
+    } catch (error) {
+      console.error('Error toggling recording:', error);
+      Alert.alert('Error', `Failed to ${isRecording ? 'stop' : 'start'} recording: ${error.message}`);
     }
   };
 
@@ -88,7 +142,7 @@ export default function Analysis() {
             <Text style={styles.sectionTitle}>Real-time Voice Analysis</Text>
             
             <View style={styles.emotionDisplay}>
-              {currentEmotion !== null && (
+              {currentEmotion !== null ? (
                 <>
                   <View 
                     style={[
@@ -100,7 +154,23 @@ export default function Analysis() {
                     Current Emotion: {emotionMap[currentEmotion]?.label || "Processing..."}
                   </Text>
                 </>
+              ) : (
+                <Text style={styles.emotionText}>
+                  Waiting for audio analysis...
+                </Text>
               )}
+            </View>
+            
+            <View style={styles.statusRow}>
+              <Text style={styles.statusText}>
+                Analysis interval: 3 seconds
+              </Text>
+              <Text style={styles.statusText}>
+                Batches processed: {analysisCounter}
+              </Text>
+              <Text style={styles.statusText}>
+                Format: PCM (raw audio)
+              </Text>
             </View>
             
             <TouchableOpacity 
@@ -119,6 +189,12 @@ export default function Analysis() {
                 {isRecording ? "Stop Recording" : "Start Recording"}
               </Text>
             </TouchableOpacity>
+            
+            {!permissionGranted && (
+              <Text style={styles.warningText}>
+                Microphone permission is required for recording.
+              </Text>
+            )}
           </View>
           
           <View style={styles.historySection}>
@@ -135,6 +211,9 @@ export default function Analysis() {
                     </Text>
                     <Text style={styles.historyConfidence}>
                       {Math.round(result.confidence * 100)}%
+                    </Text>
+                    <Text style={styles.batchNumber}>
+                      #{result.batchNumber}
                     </Text>
                   </View>
                 ))
@@ -215,6 +294,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: "#333",
   },
+  statusRow: {
+    flexDirection: "column",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  statusText: {
+    fontFamily: "Montserrat_Regular",
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 5,
+  },
   recordButton: {
     backgroundColor: "#4a6da7",
     flexDirection: "row",
@@ -232,6 +322,13 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 18,
     marginLeft: 10,
+  },
+  warningText: {
+    fontFamily: "Montserrat_Regular",
+    fontSize: 14,
+    color: "#f44336",
+    marginTop: 10,
+    textAlign: "center",
   },
   historySection: {
     flex: 1,
@@ -270,6 +367,14 @@ const styles = StyleSheet.create({
     color: "#666",
     width: 50,
     textAlign: "right",
+  },
+  batchNumber: {
+    fontFamily: "Montserrat_Regular",
+    fontSize: 12,
+    color: "#888",
+    width: 30,
+    textAlign: "right",
+    marginLeft: 5,
   },
   noDataText: {
     fontFamily: "Montserrat_Regular",

@@ -35,7 +35,7 @@ export default function Home() {
             style={styles.analysisButton}
             onPress={() => router.push("/analysis")}
           >
-            <FontAwesome name="waveform" size={24} color="white" />
+            <FontAwesome name="bar-chart" size={24} color="white" />
             <Text style={styles.analysisButtonText}>Start Analysis</Text>
           </TouchableOpacity>
         </View>

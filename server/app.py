@@ -1,44 +1,33 @@
 # server/app.py
-from fastapi import FastAPI, WebSocket
-import uvicorn
-import asyncio
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flask_sockets import Sockets
 import json
 import numpy as np
 import torch
 import librosa
-from transformers import Wav2Vec2Processor, Wav2Vec2ForSpeechClassification
+from transformers import AutoModelForAudioClassification, AutoFeatureExtractor
 import io
-from pydub import AudioSegment
+import base64
 import logging
-from fastapi.middleware.cors import CORSMiddleware
+import wave
+import struct
+import os
+import gevent
+from geventwebsocket.handler import WebSocketHandler
+from gevent import pywsgi
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = Flask(__name__)
+sockets = Sockets(app)
 
 # Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Load emotion detection model
-try:
-    logger.info("Loading speech emotion model...")
-    model_name = "superb/wav2vec2-large-xlsr-53"  # Replace with emotion-specific model if available
-    processor = Wav2Vec2Processor.from_pretrained(model_name)
-    model = Wav2Vec2ForSpeechClassification.from_pretrained(model_name)
-    logger.info("Model loaded successfully")
-except Exception as e:
-    logger.error(f"Failed to load model: {str(e)}")
-    raise
-
-# Define emotion mapping
+# Emotion mapping
 emotion_labels = {
     0: "neutral",
     1: "happy",
@@ -48,57 +37,165 @@ emotion_labels = {
     5: "fearful"
 }
 
-# Mock function to simulate emotion detection (since the actual model might need modifications)
-def analyze_emotion(audio_data):
-    # In a real implementation, you would:
-    # 1. Convert the audio data to the right format
-    # 2. Process through the model
-    # 3. Return the emotion and confidence
+# Load pre-trained model
+try:
+    logger.info("Loading speech emotion model...")
     
-    # For this example, we'll return random emotions
-    # In production, replace this with actual model inference
-    emotion = np.random.randint(0, 6)
-    confidence = np.random.random() * 0.5 + 0.5  # Random confidence between 0.5 and 1.0
+    # Use a model specifically fine-tuned for speech emotion recognition
+    model_name = "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
     
-    # Actual implementation would look like:
-    # audio = preprocess_audio(audio_data)
-    # inputs = processor(audio, sampling_rate=16000, return_tensors="pt", padding=True)
-    # with torch.no_grad():
-    #     logits = model(**inputs).logits
-    # emotion = torch.argmax(logits, dim=1).item()
-    # probabilities = torch.softmax(logits, dim=1)
-    # confidence = probabilities[0][emotion].item()
+    # Load processor and model
+    feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+    model = AutoModelForAudioClassification.from_pretrained(model_name)
     
-    return emotion, confidence
+    # Move model to GPU if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    model.eval()
+    
+    logger.info(f"Model loaded successfully on {device}")
+except Exception as e:
+    logger.error(f"Failed to load model: {str(e)}")
+    # For development, continue without the model
+    feature_extractor = None
+    model = None
+    logger.warning("Using mock emotion detection instead")
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
+def base64_to_wav(audio_base64, sample_rate=16000, bits_per_sample=16, channels=1):
+    """
+    Convert base64 encoded PCM audio to a numpy array without using FFmpeg
+    """
+    try:
+        # Decode base64 audio data
+        audio_bytes = base64.b64decode(audio_base64)
+        
+        # If the format is PCM, directly convert bytes to numpy array
+        if len(audio_bytes) % 2 == 0:  # Ensure even number of bytes for 16-bit samples
+            # Convert raw PCM bytes to numpy array (16-bit signed integer format)
+            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+            
+            # Normalize to float between -1 and 1
+            waveform = audio_array.astype(np.float32) / 32768.0
+            
+            return waveform
+        else:
+            logger.warning(f"Audio data length is not compatible with 16-bit PCM: {len(audio_bytes)} bytes")
+            return None
+    except Exception as e:
+        logger.error(f"Error converting base64 to WAV: {str(e)}")
+        return None
+
+def process_audio(audio_base64, format_type, sample_rate=16000, bits_per_sample=16, channels=1):
+    """Process audio data and detect emotion without using FFmpeg."""
+    try:
+        # Convert audio data to waveform
+        if format_type.lower() == 'pcm':
+            # Direct PCM conversion
+            waveform = base64_to_wav(audio_base64, sample_rate, bits_per_sample, channels)
+        else:
+            # Use librosa for other formats
+            audio_bytes = base64.b64decode(audio_base64)
+            with io.BytesIO(audio_bytes) as buf:
+                waveform, _ = librosa.load(buf, sr=sample_rate, mono=True)
+        
+        if waveform is None or len(waveform) == 0:
+            logger.error("Failed to convert audio data to waveform")
+            return 0, 0.5
+        
+        # Ensure proper format
+        waveform = waveform.astype(np.float32)
+        
+        # If model is available, perform actual detection
+        if model is not None and feature_extractor is not None:
+            # Make model input
+            inputs = feature_extractor(
+                waveform, 
+                sampling_rate=sample_rate, 
+                return_tensors="pt",
+                padding=True
+            )
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = model(**inputs)
+                logits = outputs.logits
+            
+            # Get predicted emotion and confidence
+            probabilities = torch.softmax(logits, dim=1)[0]
+            predicted_class = torch.argmax(probabilities).item()
+            confidence = probabilities[predicted_class].item()
+            
+            logger.info(f"Detected emotion: {emotion_labels.get(predicted_class, 'unknown')} with confidence {confidence:.2f}")
+            
+            return predicted_class, confidence
+        else:
+            # Mock emotion detection for development
+            logger.info("Using mock emotion detection")
+            emotion = np.random.randint(0, 6)
+            confidence = float(np.random.random() * 0.5 + 0.5)  # Between 0.5 and 1.0
+            
+            return emotion, confidence
+            
+    except Exception as e:
+        logger.error(f"Error in audio processing: {str(e)}")
+        # Return neutral with low confidence on error
+        return 0, 0.5
+
+@sockets.route('/ws')
+def websocket_endpoint(ws):
     logger.info("WebSocket connection established")
     
     try:
-        while True:
-            # Receive audio stream chunk
-            data = await websocket.receive_json()
+        while not ws.closed:
+            # Receive message
+            message = ws.receive()
+            if message is None:
+                continue
             
-            # For now, we'll use mock emotion detection
-            # In a real implementation, you would process the actual audio data
-            emotion, confidence = analyze_emotion(data)
+            # Parse the message
+            data = json.loads(message)
+            
+            if 'audio' in data:
+                logger.info("Received audio data")
+                emotion, confidence = process_audio(
+                    data['audio'],
+                    data.get('format', 'pcm'),
+                    data.get('sampleRate', 16000),
+                    data.get('bitsPerSample', 16),
+                    data.get('channels', 1)
+                )
+            else:
+                # Handle heartbeat or messages without audio
+                logger.info(f"Received data without audio: {data}")
+                continue
             
             # Send analysis results back to client
-            await websocket.send_json({
+            result = {
                 "emotion": int(emotion),
                 "emotion_label": emotion_labels.get(emotion, "unknown"),
                 "confidence": float(confidence)
-            })
+            }
+            
+            logger.info(f"Sending result: {result}")
+            ws.send(json.dumps(result))
     except Exception as e:
         logger.error(f"WebSocket error: {str(e)}")
     finally:
         logger.info("WebSocket connection closed")
 
-@app.get("/")
-async def root():
-    return {"message": "Support Call Analyzer API"}
+@app.route('/')
+def root():
+    return jsonify({"message": "Support Call Analyzer API", "status": "running"})
+
+@app.route('/health')
+def health_check():
+    return jsonify({
+        "status": "healthy",
+        "model_loaded": model is not None and feature_extractor is not None
+    })
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)
+    # Use gevent server with WebSocket support
+    server = pywsgi.WSGIServer(('0.0.0.0', 5000), app, handler_class=WebSocketHandler)
+    logger.info("Starting server on port 5000")
+    server.serve_forever()

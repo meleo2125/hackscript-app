@@ -1,11 +1,9 @@
-# server/requirements.txt
-fastapi
-uvicorn
-websockets
-pydub
+flask
+flask-cors
+flask-sockets
+gevent
+gevent-websocket
 numpy
 torch
-torchaudio
-transformers
 librosa
-python-multipart
+transformers
