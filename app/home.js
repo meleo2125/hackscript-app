@@ -2,8 +2,11 @@ import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { FontAwesome } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 
 export default function Home() {
+  const router = useRouter();
+  
   return (
     <LinearGradient
       colors={["#4a6da7", "#6b8cce"]}
@@ -31,12 +34,18 @@ export default function Home() {
         </View>
         
         <View style={styles.buttonContainer}>
-          <TouchableOpacity style={styles.button}>
-            <Text style={styles.buttonText}>Explore Features</Text>
+          <TouchableOpacity 
+            style={styles.button}
+            onPress={() => router.push("/profile")}
+          >
+            <Text style={styles.buttonText}>Profile</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={[styles.button, styles.secondaryButton]}>
-            <Text style={styles.buttonText}>Learn More</Text>
+          <TouchableOpacity 
+            style={[styles.button, styles.secondaryButton]}
+            onPress={() => router.push("/settings")}
+          >
+            <Text style={styles.buttonText}>Settings</Text>
           </TouchableOpacity>
         </View>
       </View>

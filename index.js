@@ -1,5 +1,2 @@
-import { Redirect } from "expo-router";
-
-export default function Index() {
-  return <Redirect href="/app/home" />;
-}
+// ipr-app/index.js (root level)
+import "expo-router/entry";
