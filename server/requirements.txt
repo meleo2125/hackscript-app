@@ -1,0 +1,11 @@
+# server/requirements.txt
+fastapi
+uvicorn
+websockets
+pydub
+numpy
+torch
+torchaudio
+transformers
+librosa
+python-multipart

@@ -1,3 +1,4 @@
+// app/_layout.js
 import React from "react";
 import { Stack } from "expo-router";
 import {
@@ -33,6 +34,7 @@ export default function AppLayout() {
         <Stack.Screen name="home" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="profile" />
+        <Stack.Screen name="analysis" />
       </Stack>
     </>
   );

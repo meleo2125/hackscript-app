@@ -1,3 +1,4 @@
+// app/home.js
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -14,23 +15,29 @@ export default function Home() {
     >
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title}>Welcome to IPR App</Text>
-          <FontAwesome name="home" size={30} color="white" style={styles.icon} />
+          <Text style={styles.title}>Support Call Analyzer</Text>
+          <FontAwesome name="microphone" size={30} color="white" style={styles.icon} />
         </View>
         
         <View style={styles.card}>
           <Text style={styles.paragraph}>
-            This is a demonstration of the IPR application interface. Our platform is designed to 
-            streamline intellectual property rights management with an intuitive user experience.
-            Navigate through the application to explore features related to patent submissions,
-            trademark registration, and copyright protection services.
+            Welcome to the Support Call Analyzer app. This tool helps analyze support calls 
+            between AI agents and users by detecting emotions through voice analysis.
           </Text>
           
           <Text style={styles.paragraph}>
-            In the full version, you'll have access to comprehensive tools for managing your 
-            intellectual property portfolio, tracking application status, and receiving timely 
-            notifications about important deadlines and updates.
+            Start a new analysis session to record and analyze the emotional tone of a conversation.
+            The system uses advanced AI models to detect emotions like neutral, happy, angry, sad,
+            and more in real-time.
           </Text>
+          
+          <TouchableOpacity 
+            style={styles.analysisButton}
+            onPress={() => router.push("/analysis")}
+          >
+            <FontAwesome name="waveform" size={24} color="white" />
+            <Text style={styles.analysisButtonText}>Start Analysis</Text>
+          </TouchableOpacity>
         </View>
         
         <View style={styles.buttonContainer}>
@@ -90,6 +97,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    alignItems: "center",
   },
   paragraph: {
     fontFamily: "Montserrat_Regular",
@@ -97,6 +105,22 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     color: "#333",
     marginBottom: 15,
+  },
+  analysisButton: {
+    backgroundColor: "#4a6da7",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 30,
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  analysisButtonText: {
+    fontFamily: "Montserrat_Bold",
+    color: "white",
+    fontSize: 18,
+    marginLeft: 10,
   },
   buttonContainer: {
     flexDirection: "row",
