@@ -5,7 +5,7 @@ import {
   Montserrat_400Regular,
   Montserrat_700Bold,
 } from "@expo-google-fonts/montserrat";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, StatusBar } from "react-native";
 
 export default function AppLayout() {
   const [fontsLoaded] = useFonts({
@@ -22,13 +22,18 @@ export default function AppLayout() {
   }
 
   return (
-    <Stack screenOptions={{ 
-      headerShown: false,
-      animation: "fade" 
-    }}>
-      <Stack.Screen name="home" />
-      <Stack.Screen name="settings" />
-      <Stack.Screen name="profile" />
-    </Stack>
+    <>
+      {/* Hide the status bar */}
+      <StatusBar hidden={true} />
+      
+      <Stack screenOptions={{ 
+        headerShown: false,
+        animation: "fade" 
+      }}>
+        <Stack.Screen name="home" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="profile" />
+      </Stack>
+    </>
   );
 }
